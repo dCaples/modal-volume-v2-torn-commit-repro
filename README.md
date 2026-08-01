@@ -14,6 +14,15 @@ never existed on any writer: new entry + new size + zero data.
 ## Repro
 
 ```bash
-pip install modal   # observed on modal==1.4.2
+pip install modal   # reproduced on modal==1.4.2 and 1.5.0
 modal run repro_vol_tear.py
 ```
+
+The race is probabilistic (a run samples a limited number of committed snapshots):
+observed 5/6 runs reproducing across modal 1.4.2 and 1.5.0. Delete the scratch
+volume (`modal volume delete vol-v2-tear-repro-scratch --yes`) and repeat if the
+first run reports NO-REPRO.
+
+`modal run repro_vol_tear.py --no-commit-loop --rounds 200` writes with **no
+explicit commits at all**, to test whether the platform's background commits
+produce the same torn state on their own.
