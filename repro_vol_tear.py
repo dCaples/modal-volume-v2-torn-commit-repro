@@ -55,16 +55,27 @@ def pattern_bytes(name: str) -> bytes:
     return (seed * reps)[:FILE_SIZE]
 
 
-def _write_one(dirpath: str, fname: str, payload: bytes) -> None:
-    """Standard atomic-write pattern: temp file in the same dir, then os.replace."""
+def _write_one(dirpath: str, fname: str, payload: bytes, write_mode: str = "atomic") -> None:
+    """Write one file. Modes:
+    atomic — temp file in the same dir, then os.replace (standard atomic pattern)
+    direct — plain open(final, "wb").write(), no rename involved
+    fsync  — like atomic, but flush + os.fsync before the os.replace
+    """
     import os
     import tempfile
 
     path = os.path.join(dirpath, fname)
+    if write_mode == "direct":
+        with open(path, "wb") as f:
+            f.write(payload)
+        return
     fd, tmp_name = tempfile.mkstemp(prefix=f".{fname}.", dir=dirpath)
     try:
         with os.fdopen(fd, "wb") as tmp:
             tmp.write(payload)
+            if write_mode == "fsync":
+                tmp.flush()
+                os.fsync(tmp.fileno())
         os.replace(tmp_name, path)
     except BaseException:
         import contextlib
@@ -75,14 +86,14 @@ def _write_one(dirpath: str, fname: str, payload: bytes) -> None:
 
 
 @app.function(image=image, volumes={MOUNT: vol}, timeout=3600, cpu=4)
-def writer(commit_loop: bool = True, rounds: int = ROUNDS) -> dict:
+def writer(commit_loop: bool = True, rounds: int = ROUNDS, write_mode: str = "atomic") -> dict:
     import os
     import threading
     import time
     from concurrent.futures import ThreadPoolExecutor
 
     stop = threading.Event()
-    stats = {"commits": 0, "commit_errors": 0, "commit_loop": commit_loop}
+    stats = {"commits": 0, "commit_errors": 0, "commit_loop": commit_loop, "write_mode": write_mode}
 
     def committer() -> None:
         while not stop.is_set():
@@ -106,7 +117,7 @@ def writer(commit_loop: bool = True, rounds: int = ROUNDS) -> dict:
         os.makedirs(d, exist_ok=True)
         list(
             pool.map(
-                lambda i: _write_one(d, f"f{i:03d}.bin", pattern_bytes(f"{dirname}/{i}")),
+                lambda i: _write_one(d, f"f{i:03d}.bin", pattern_bytes(f"{dirname}/{i}"), write_mode),
                 range(BURST),
             )
         )
@@ -203,11 +214,11 @@ def reader(reader_id: int, duration_s: int) -> dict:
 
 
 @app.local_entrypoint()
-def main(commit_loop: bool = True, rounds: int = ROUNDS) -> None:
+def main(commit_loop: bool = True, rounds: int = ROUNDS, write_mode: str = "atomic") -> None:
     print(f"volume={VOLUME_NAME} file_size={FILE_SIZE} burst={BURST} rounds={rounds} "
-          f"readers={READERS} commit_loop={commit_loop}")
+          f"readers={READERS} commit_loop={commit_loop} write_mode={write_mode}")
     reader_calls = [reader.spawn(reader_id=i, duration_s=1500) for i in range(READERS)]
-    writer_stats = writer.remote(commit_loop=commit_loop, rounds=rounds)
+    writer_stats = writer.remote(commit_loop=commit_loop, rounds=rounds, write_mode=write_mode)
     print(f"writer finished: {writer_stats}")
     all_anomalies = []
     for i, call in enumerate(reader_calls):
