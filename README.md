@@ -24,5 +24,6 @@ volume (`modal volume delete vol-v2-tear-repro-scratch --yes`) and repeat if the
 first run reports NO-REPRO.
 
 `modal run repro_vol_tear.py --no-commit-loop --rounds 200` writes with **no
-explicit commits at all**, to test whether the platform's background commits
-produce the same torn state on their own.
+explicit commits at all**. This mode also reproduces — worse (362 and 218 torn
+reads in two control runs): the platform's background commits publish the same
+torn state on their own. User commit discipline cannot avoid this bug.
